@@ -2,6 +2,44 @@ import { describe, expect, it } from "vitest";
 import { markdownToTiptapDoc } from "./markdownToProsemirror.js";
 import { tiptapDocToMarkdown } from "./prosemirrorToMarkdown.js";
 
+describe("reference-style image conversion", () => {
+	it("parses reference-style images into image nodes", () => {
+		const doc = markdownToTiptapDoc(
+			"![diagram][shot]\n\n[shot]: example.assets/abc123.png",
+		);
+		expect(doc.content?.[0]?.type).toBe("image");
+		expect(doc.content?.[0]?.attrs).toEqual({
+			src: "example.assets/abc123.png",
+			alt: "diagram",
+			title: undefined,
+		});
+		expect(tiptapDocToMarkdown(doc)).toBe(
+			"![diagram](example.assets/abc123.png)",
+		);
+	});
+
+	it("keeps reference images mixed with text", () => {
+		const doc = markdownToTiptapDoc(
+			"before ![shot][s] after\n\n[s]: example.png",
+		);
+		expect(doc.content).toMatchObject([
+			{ type: "paragraph", content: [{ type: "text", text: "before" }] },
+			{ type: "image", attrs: { src: "example.png", alt: "shot" } },
+			{ type: "paragraph", content: [{ type: "text", text: "after" }] },
+		]);
+	});
+
+	it("keeps unresolved image references as literal text", () => {
+		const input = "![alt][missing]";
+		const doc = markdownToTiptapDoc(input);
+		expect(doc.content?.[0]).toMatchObject({
+			type: "paragraph",
+			content: [{ type: "text", text: input }],
+		});
+		expect(tiptapDocToMarkdown(doc)).toBe(input);
+	});
+});
+
 describe("image markdown conversion", () => {
 	it("parses markdown image into image node", () => {
 		const doc = markdownToTiptapDoc("![diagram](example.assets/abc123.png)");
