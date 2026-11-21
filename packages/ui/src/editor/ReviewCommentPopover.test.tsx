@@ -132,6 +132,44 @@ describe("ReviewCommentPopover", () => {
 		);
 	});
 
+	it("opens a thread whose reply carries an unparseable createdAt", async () => {
+		// An agent can write any string into the metadata ("yesterday"); the
+		// thread must still open instead of the note crashing into the error
+		// boundary. Mirrors the playground's launch-checklist.md thread.
+		const editor = new Editor({
+			element: document.createElement("div"),
+			extensions: [StarterKit, ReviewMarkExtension],
+			content: markdownToTiptapDoc(
+				'{==Record the demo video==}{>>Can this slip a day?<<}{#c1}<!-- marky-review:{"v":1,"replies":[{"id":"r1","body":"Moved it to Thursday so the script gets another pass.","author":"agent","createdAt":"yesterday"}],"resolved":false}-->',
+			),
+		});
+		editors.push(editor);
+
+		const viewport = document.createElement("div");
+		viewport.append(editor.view.dom);
+		document.body.append(viewport);
+		renderPopover(editor, viewport);
+
+		const mark = editor.view.dom.querySelector(
+			'[data-review-type="reviewComment"]',
+		);
+		await act(async () => {
+			mark?.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+		});
+
+		const popover = document.querySelector("[data-review-comment-popover]");
+		expect(popover).not.toBeNull();
+		expect(popover?.textContent).toContain(
+			"Moved it to Thursday so the script gets another pass.",
+		);
+		// The unparseable timestamp renders no <time> element.
+		expect(popover?.querySelector("time")).toBeNull();
+		// The note itself is untouched.
+		expect(editor.view.dom.querySelector("mark")?.textContent).toBe(
+			"Record the demo video",
+		);
+	});
+
 	it("publishes threads and acts on one by id", async () => {
 		const editor = new Editor({
 			element: document.createElement("div"),
