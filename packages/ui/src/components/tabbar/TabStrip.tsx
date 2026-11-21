@@ -31,7 +31,11 @@ export type TabStripItem = {
 export type TabStripProps = {
 	tabs: TabStripItem[];
 	activeTabId: string | null;
-	/** Removes the first tab's bottom-left flare so its edge meets the expanded sidebar's divider. */
+	/**
+	 * Aligns the strip's left edge with the expanded sidebar's divider: the
+	 * active first tab drops its bottom-left flare so its edge continues the
+	 * divider, and the pane corner is rounded whenever no tab occupies it.
+	 */
 	flushStart?: boolean;
 	showStartDivider?: boolean;
 	/** Enables hiding crowded tabs when the caller provides another way to select them. */
@@ -119,6 +123,10 @@ export function TabStrip({
 		0,
 		tabs.findIndex((tab) => tab.id === activeTabId),
 	);
+	// The active first tab's outline draws the pane corner itself; any other
+	// state leaves the seam bare, so the rounded corner piece steps in.
+	const showSeamCorner =
+		flushStart && (collapsed || activeTabId === null || anchor !== 0);
 
 	useEffect(() => {
 		if (!editingId) return;
@@ -351,6 +359,7 @@ export function TabStrip({
 					<MingcuteAddLine className="size-3.5" />
 				</Button>
 			) : null}
+			{showSeamCorner ? <SeamCorner /> : null}
 		</div>
 	);
 }
@@ -392,6 +401,38 @@ function TabMenu({
 				</ContextMenu.Popup>
 			</ContextMenu.Positioner>
 		</ContextMenu.Portal>
+	);
+}
+
+/**
+ * Rounds the content pane's top-left corner where the title bar's bottom
+ * border meets the docked sidebar's end border. The strip's left edge sits on
+ * that seam, so this mirrors the active tab's flush left edge with the same
+ * radius; without it the two borders meet at a bare right angle that reads as
+ * a one-pixel hole at the junction.
+ */
+function SeamCorner() {
+	return (
+		<svg
+			aria-hidden="true"
+			data-seam-corner
+			viewBox="0 0 10 10"
+			className="pointer-events-none absolute bottom-0 left-0 z-20 h-2.5 w-2.5"
+		>
+			{/* Pane side: the background continues up into the rounded corner. */}
+			<path
+				d="M.5 10 V3.5 Q.5 9.5 6.5 9.5 H10 V10 Z"
+				fill="var(--background)"
+			/>
+			{/* Sidebar side: covers the title bar's border under the roundover. */}
+			<path d="M0 0 H10 V9.5 H6.5 Q.5 9.5 .5 3.5 V0 Z" fill="var(--sidebar)" />
+			{/* The corner itself, joining the sidebar divider to the pane's top border. */}
+			<path
+				d="M.5 10 V3.5 Q.5 9.5 6.5 9.5 H10"
+				fill="none"
+				stroke="var(--border)"
+			/>
+		</svg>
 	);
 }
 

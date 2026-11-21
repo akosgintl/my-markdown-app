@@ -340,6 +340,31 @@ describe("TabStrip", () => {
 	});
 });
 
+describe("docked sidebar seam", () => {
+	const seamCorner = () => document.querySelector("[data-seam-corner]");
+
+	it.each([
+		{
+			activeTabId: "a",
+			label: "the active first tab's edge covers the corner",
+			corner: false,
+		},
+		{ activeTabId: "b", label: "another tab is active", corner: true },
+		{ activeTabId: null, label: "no tab is active", corner: true },
+	])("$label, so the pane corner piece is drawn: $corner", ({
+		activeTabId,
+		corner,
+	}) => {
+		renderStrip({ flushStart: true, activeTabId });
+		expect(seamCorner() !== null).toBe(corner);
+	});
+
+	it("draws no corner piece when the sidebar is not docked", () => {
+		renderStrip({ flushStart: false, activeTabId: "b" });
+		expect(seamCorner()).toBeNull();
+	});
+});
+
 describe("tab dragging", () => {
 	function setup() {
 		const onReorder = vi.fn();
