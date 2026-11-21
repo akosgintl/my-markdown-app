@@ -14,6 +14,7 @@ import type { Editor } from "@tiptap/core";
 import { TextSelection } from "@tiptap/pm/state";
 import { keymatch } from "keymatch";
 import {
+	type ClipboardEvent as ReactClipboardEvent,
 	type RefObject,
 	useEffect,
 	useLayoutEffect,
@@ -658,6 +659,10 @@ export function LinkPopover({
 	const machineStateRef = useRef(machineState);
 	const anchorRef = useRef(INITIAL_LINK_ANCHOR_STATE);
 	const lastSelectionActiveKeyRef = useRef<string | null>(null);
+	// The href just autofilled from the clipboard that the user has not edited
+	// yet. While the input still holds exactly this value, a paste replaces it
+	// instead of appending a second copy of the URL.
+	const clipboardAutofilledHrefRef = useRef<string | null>(null);
 	const expandNextLinkSessionRef = useRef(false);
 	const originalWikiTargetRef = useRef<{
 		activeKey: string;
@@ -822,6 +827,14 @@ export function LinkPopover({
 		if (!editor) return;
 		const update = (reason: PositionUpdateReason = "layout") => {
 			const { link, activeKey } = getLinkSession(editor);
+			// The autofilled value only applies while the same URL is still in the
+			// input; any other link session (or none) invalidates it.
+			if (
+				clipboardAutofilledHrefRef.current !== null &&
+				link?.href !== clipboardAutofilledHrefRef.current
+			) {
+				clipboardAutofilledHrefRef.current = null;
+			}
 			if (!link || !activeKey || link.kind !== "wiki") {
 				originalWikiTargetRef.current = null;
 			} else if (originalWikiTargetRef.current?.activeKey !== activeKey) {
@@ -947,6 +960,7 @@ export function LinkPopover({
 							updateLinkMark(editor, link, href);
 							setHrefValue(href);
 							setActiveLink({ ...link, ...linkAttrsForHref(href) });
+							clipboardAutofilledHrefRef.current = href;
 							dispatchMachineEvent({ type: "EXPAND_REQUESTED" });
 						})
 						.catch(() => {});
@@ -1262,8 +1276,31 @@ export function LinkPopover({
 	// ── Handlers ────────────────────────────────────────────────────
 	const handleExistingLinkInput = (href: string) => {
 		if (!activeLink) return;
+		// Any user-driven edit means the value is no longer the untouched
+		// clipboard autofill.
+		clipboardAutofilledHrefRef.current = null;
 		setHrefValue(href);
 		updateLinkMark(editor, activeLink, href);
+	};
+	// The clipboard autofill lands after the input has been focused, so the URL
+	// sits at the end of the input with the cursor after it. A paste then must
+	// replace that untouched autofill instead of appending a second copy.
+	const handleExistingLinkPaste = (
+		event: ReactClipboardEvent<HTMLInputElement>,
+	) => {
+		const autofilledHref = clipboardAutofilledHrefRef.current;
+		if (
+			!activeLink ||
+			autofilledHref === null ||
+			hrefValue !== autofilledHref
+		) {
+			return;
+		}
+		const pastedHref = event.clipboardData.getData("text/plain").trim();
+		if (!pastedHref) return;
+		event.preventDefault();
+		handleExistingLinkInput(pastedHref);
+		setActiveSuggestionIndex(0);
 	};
 
 	// ── Render ──────────────────────────────────────────────────────
@@ -1418,6 +1455,7 @@ export function LinkPopover({
 								handleExistingLinkInput(event.target.value);
 								setActiveSuggestionIndex(0);
 							}}
+							onPaste={handleExistingLinkPaste}
 							className="h-7 rounded-sm border-border bg-background px-2 py-1.25 text-[11px] leading-4"
 						/>
 					</div>
