@@ -3,6 +3,7 @@
 import { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import type { TabsState } from "../store/tabs";
 
 class MockTerminal {
 	options: Record<string, unknown> = {};
@@ -110,6 +111,21 @@ function getSessionButtons(container: HTMLElement) {
 	);
 }
 
+/** Fixed doc tab ids keep assertions readable. */
+function seededTabs(
+	paths: Record<string, string>,
+	activeTabId: string | null,
+): TabsState {
+	return {
+		closed: [],
+		order: Object.keys(paths),
+		activeTabId,
+		byId: Object.fromEntries(
+			Object.entries(paths).map(([id, path]) => [id, { path }]),
+		),
+	};
+}
+
 async function loadTerminalPanel(api: MockDesktopApi) {
 	vi.resetModules();
 	vi.stubGlobal("localStorage", {
@@ -173,6 +189,7 @@ describe("TerminalPanel", () => {
 				...state.workspace,
 				workspacePath: "/workspace-a",
 			},
+			tabs: seededTabs({ a: "/workspace-a/note.md" }, "a"),
 			ui: {
 				...state.ui,
 				isTerminalOpen: true,
@@ -198,6 +215,7 @@ describe("TerminalPanel", () => {
 				...state.workspace,
 				workspacePath: "/workspace-a",
 			},
+			tabs: seededTabs({ a: "/workspace-a/note.md" }, "a"),
 			document: {
 				...state.document,
 				currentPath: "/workspace-a/note.md",
@@ -232,6 +250,7 @@ describe("TerminalPanel", () => {
 				...state.workspace,
 				workspacePath: "/workspace-a",
 			},
+			tabs: seededTabs({ a: "/workspace-a/note.md" }, "a"),
 			document: {
 				...state.document,
 				currentPath: "/workspace-a/note.md",
@@ -273,6 +292,7 @@ describe("TerminalPanel", () => {
 				...state.workspace,
 				workspacePath: "/workspace-a",
 			},
+			tabs: seededTabs({ a: "/workspace-a/note.md" }, "a"),
 			ui: {
 				...state.ui,
 				isTerminalOpen: true,
@@ -307,6 +327,7 @@ describe("TerminalPanel", () => {
 				...state.workspace,
 				workspacePath: "/workspace-a",
 			},
+			tabs: seededTabs({ a: "/workspace-a/note.md" }, "a"),
 			ui: {
 				...state.ui,
 				isTerminalOpen: true,
@@ -319,7 +340,8 @@ describe("TerminalPanel", () => {
 		});
 		expect(api.terminalStart).toHaveBeenNthCalledWith(1, "/workspace-a", {});
 
-		// Switch workspaces while the first shell is still starting.
+		// Switch workspaces while the first shell is still starting; a real
+		// switch replaces the whole document tab set.
 		await act(async () => {
 			appStore.set((state) => ({
 				...state,
@@ -327,6 +349,7 @@ describe("TerminalPanel", () => {
 					...state.workspace,
 					workspacePath: "/workspace-b",
 				},
+				tabs: seededTabs({ b: "/workspace-b/other.md" }, "b"),
 			}));
 			await flush();
 		});
@@ -355,6 +378,7 @@ describe("TerminalPanel", () => {
 				...state.workspace,
 				workspacePath: "/workspace-a",
 			},
+			tabs: seededTabs({ a: "/workspace-a/note.md" }, "a"),
 			ui: {
 				...state.ui,
 				isTerminalOpen: true,
@@ -375,6 +399,7 @@ describe("TerminalPanel", () => {
 					...state.workspace,
 					workspacePath: "/workspace-b",
 				},
+				tabs: seededTabs({ b: "/workspace-b/other.md" }, "b"),
 			}));
 			await flush();
 		});
@@ -402,6 +427,7 @@ describe("TerminalPanel", () => {
 				...state.workspace,
 				workspacePath: "/workspace-a",
 			},
+			tabs: seededTabs({ a: "/workspace-a/note.md" }, "a"),
 			ui: {
 				...state.ui,
 				isTerminalOpen: true,
@@ -432,6 +458,7 @@ describe("TerminalPanel", () => {
 				...state.workspace,
 				workspacePath: "/workspace-a",
 			},
+			tabs: seededTabs({ a: "/workspace-a/note.md" }, "a"),
 			ui: {
 				...state.ui,
 				isTerminalOpen: true,
@@ -477,6 +504,7 @@ describe("TerminalPanel", () => {
 				...state.workspace,
 				workspacePath: "/workspace-a",
 			},
+			tabs: seededTabs({ a: "/workspace-a/note.md" }, "a"),
 			ui: {
 				...state.ui,
 				isTerminalOpen: true,
@@ -507,6 +535,7 @@ describe("TerminalPanel", () => {
 				...state.workspace,
 				workspacePath: "/workspace-a",
 			},
+			tabs: seededTabs({ a: "/workspace-a/note.md" }, "a"),
 			ui: {
 				...state.ui,
 				isTerminalOpen: true,
@@ -560,6 +589,7 @@ describe("TerminalPanel", () => {
 				...state.workspace,
 				workspacePath: "/workspace-a",
 			},
+			tabs: seededTabs({ a: "/workspace-a/note.md" }, "a"),
 			ui: {
 				...state.ui,
 				isTerminalOpen: true,
@@ -578,5 +608,164 @@ describe("TerminalPanel", () => {
 
 		expect(appStore.get().ui.isTerminalOpen).toBe(false);
 		expect(api.terminalStop).not.toHaveBeenCalled();
+	});
+
+	it("shows each document tab its own terminals and keeps background ones running", async () => {
+		const { api } = createDesktopApi();
+		const { appStore, TerminalPanel } = await loadTerminalPanel(api);
+
+		appStore.set((state) => ({
+			...state,
+			workspace: {
+				...state.workspace,
+				workspacePath: "/workspace-a",
+			},
+			tabs: seededTabs(
+				{ a: "/workspace-a/note.md", b: "/workspace-a/other.md" },
+				"a",
+			),
+			ui: {
+				...state.ui,
+				isTerminalOpen: true,
+			},
+		}));
+
+		await act(async () => {
+			root.render(<TerminalPanel />);
+			await flush();
+		});
+
+		// Two terminals for the first note; pick the first one.
+		await act(async () => {
+			getButtonByTitle(container, "New Terminal").click();
+			await flush();
+		});
+		expect(getSessionButtons(container)).toHaveLength(2);
+		await act(async () => {
+			getSessionButtons(container)[0]?.click();
+			await flush();
+		});
+		expect(getSessionButtons(container)[0]?.getAttribute("aria-pressed")).toBe(
+			"true",
+		);
+
+		// Switching notes swaps the strip and kills nothing in the background.
+		await act(async () => {
+			appStore.set((state) => ({
+				...state,
+				tabs: seededTabs(
+					{ a: "/workspace-a/note.md", b: "/workspace-a/other.md" },
+					"b",
+				),
+			}));
+			await flush();
+		});
+
+		expect(getSessionButtons(container)).toHaveLength(0);
+		expect(appStore.get().ui.isTerminalOpen).toBe(true);
+		expect(api.terminalStop).not.toHaveBeenCalled();
+
+		// Back to the first note: both terminals are there and the selection
+		// is exactly where it was left.
+		await act(async () => {
+			appStore.set((state) => ({
+				...state,
+				tabs: seededTabs(
+					{ a: "/workspace-a/note.md", b: "/workspace-a/other.md" },
+					"a",
+				),
+			}));
+			await flush();
+		});
+
+		expect(api.terminalStart).toHaveBeenCalledTimes(2);
+		expect(getSessionButtons(container)).toHaveLength(2);
+		expect(getSessionButtons(container)[0]?.getAttribute("aria-pressed")).toBe(
+			"true",
+		);
+		expect(api.terminalStop).not.toHaveBeenCalled();
+	});
+
+	it("does not boot a shell when switching to a document tab without terminals", async () => {
+		const { api } = createDesktopApi();
+		const { appStore, TerminalPanel } = await loadTerminalPanel(api);
+
+		appStore.set((state) => ({
+			...state,
+			workspace: {
+				...state.workspace,
+				workspacePath: "/workspace-a",
+			},
+			tabs: seededTabs(
+				{ a: "/workspace-a/note.md", b: "/workspace-a/other.md" },
+				"a",
+			),
+			ui: {
+				...state.ui,
+				isTerminalOpen: true,
+			},
+		}));
+
+		await act(async () => {
+			root.render(<TerminalPanel />);
+			await flush();
+		});
+		expect(api.terminalStart).toHaveBeenCalledTimes(1);
+
+		await act(async () => {
+			appStore.set((state) => ({
+				...state,
+				tabs: seededTabs(
+					{ a: "/workspace-a/note.md", b: "/workspace-a/other.md" },
+					"b",
+				),
+			}));
+			await flush();
+		});
+
+		expect(api.terminalStart).toHaveBeenCalledTimes(1);
+		expect(appStore.get().ui.isTerminalOpen).toBe(true);
+		expect(container.textContent).toContain("No active terminal sessions.");
+	});
+
+	it("stops a closed document tab's terminals", async () => {
+		const { api } = createDesktopApi();
+		const { appStore, TerminalPanel } = await loadTerminalPanel(api);
+
+		appStore.set((state) => ({
+			...state,
+			workspace: {
+				...state.workspace,
+				workspacePath: "/workspace-a",
+			},
+			tabs: seededTabs({ a: "/workspace-a/note.md" }, "a"),
+			ui: {
+				...state.ui,
+				isTerminalOpen: true,
+			},
+		}));
+
+		await act(async () => {
+			root.render(<TerminalPanel />);
+			await flush();
+		});
+
+		await act(async () => {
+			getButtonByTitle(container, "New Terminal").click();
+			await flush();
+		});
+
+		// Closing the note takes its terminals with it.
+		await act(async () => {
+			appStore.set((state) => ({
+				...state,
+				tabs: seededTabs({ b: "/workspace-a/other.md" }, "b"),
+			}));
+			await flush();
+		});
+
+		expect(api.terminalStop).toHaveBeenCalledWith("term-1");
+		expect(api.terminalStop).toHaveBeenCalledWith("term-2");
+		expect(appStore.get().ui.isTerminalOpen).toBe(true);
 	});
 });
