@@ -158,6 +158,9 @@ export function Sidebar({
 			onRevealFolder={(folderId) =>
 				void desktopApi.revealFile(absolutePath(folderId))
 			}
+			onCopyFolderPath={(folderId) =>
+				void copyText(absolutePath(folderId), "Folder path")
+			}
 			onFocusedItemChange={(item: SidebarFocusedItem) => {
 				if (!item) {
 					onFocusedItemChange?.(null);
