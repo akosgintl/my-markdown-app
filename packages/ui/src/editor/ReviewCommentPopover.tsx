@@ -54,6 +54,23 @@ function formatRelativeTime(iso: string | undefined) {
 	return new Date(timestamp).toLocaleDateString();
 }
 
+/** Replies round-trip through markdown metadata, so createdAt can be truthy
+ * but unparseable; toISOString on an invalid date throws, so render no
+ * timestamp instead of crashing the thread. */
+function ReplyTime({ value }: { value: string | undefined }) {
+	if (!value) return null;
+	const timestamp = new Date(value).getTime();
+	if (Number.isNaN(timestamp)) return null;
+	return (
+		<time
+			dateTime={new Date(timestamp).toISOString()}
+			className="truncate text-[11px] text-muted-foreground"
+		>
+			{formatRelativeTime(value)}
+		</time>
+	);
+}
+
 function authorLabel(author: "human" | "agent" | undefined) {
 	return author === "agent" ? "Agent" : "You";
 }
@@ -724,14 +741,7 @@ export function ReviewCommentPopover({
 											<span className="shrink-0 text-xs font-semibold">
 												{authorLabel(reply.author)}
 											</span>
-											{reply.createdAt && (
-												<time
-													dateTime={new Date(reply.createdAt).toISOString()}
-													className="truncate text-[11px] text-muted-foreground"
-												>
-													{formatRelativeTime(reply.createdAt)}
-												</time>
-											)}
+											<ReplyTime value={reply.createdAt} />
 										</div>
 										<p className="mt-0.5 whitespace-pre-wrap text-[0.8125rem] leading-relaxed">
 											{reply.body}
