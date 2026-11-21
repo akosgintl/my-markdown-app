@@ -303,6 +303,77 @@ describe("ReviewCommentPopover", () => {
 		expect(replies[0]?.body).toBe("Sounds good");
 	});
 
+	// Replies round-trip through markdown metadata, so a hand- or agent-edited
+	// file can carry a truthy but unparseable createdAt. The thread must still
+	// open, minus the timestamp, instead of crashing the popover.
+	it("opens a thread whose reply has an unparseable createdAt", async () => {
+		const markdown = `{==commented==}{>>A note<<}{#c1}<!-- marky-review:${JSON.stringify(
+			{
+				v: 1,
+				replies: [{ id: "r1", body: "Sounds good", createdAt: "next Tuesday" }],
+				resolved: false,
+			},
+		)}-->`;
+		const editor = new Editor({
+			element: document.createElement("div"),
+			extensions: [StarterKit, ReviewMarkExtension],
+			content: markdownToTiptapDoc(markdown),
+		});
+		editors.push(editor);
+
+		const viewport = document.createElement("div");
+		viewport.append(editor.view.dom);
+		document.body.append(viewport);
+		renderPopover(editor, viewport);
+
+		const mark = editor.view.dom.querySelector(
+			'[data-review-type="reviewComment"]',
+		);
+		await act(async () => {
+			mark?.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+		});
+
+		const popover = document.querySelector("[data-review-comment-popover]");
+		expect(popover).not.toBeNull();
+		expect(popover?.textContent).toContain("Sounds good");
+		expect(popover?.querySelector("time")).toBeNull();
+	});
+
+	it("keeps the timestamp for a reply with a valid createdAt", async () => {
+		const createdAt = new Date().toISOString();
+		const markdown = `{==commented==}{>>A note<<}{#c1}<!-- marky-review:${JSON.stringify(
+			{
+				v: 1,
+				replies: [{ id: "r1", body: "Sounds good", createdAt }],
+				resolved: false,
+			},
+		)}-->`;
+		const editor = new Editor({
+			element: document.createElement("div"),
+			extensions: [StarterKit, ReviewMarkExtension],
+			content: markdownToTiptapDoc(markdown),
+		});
+		editors.push(editor);
+
+		const viewport = document.createElement("div");
+		viewport.append(editor.view.dom);
+		document.body.append(viewport);
+		renderPopover(editor, viewport);
+
+		const mark = editor.view.dom.querySelector(
+			'[data-review-type="reviewComment"]',
+		);
+		await act(async () => {
+			mark?.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+		});
+
+		const time = document.querySelector<HTMLTimeElement>(
+			"[data-review-comment-popover] time",
+		);
+		expect(time?.getAttribute("dateTime")).toBe(createdAt);
+		expect(time?.textContent).toBe("Just now");
+	});
+
 	// An id-less comment is valid CriticMarkup, but collectComments can't key on
 	// it, so it has to block the new comment rather than reopen as a thread.
 	it.each([
