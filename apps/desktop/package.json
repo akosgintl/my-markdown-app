@@ -109,6 +109,7 @@
 		},
 		"linux": {
 			"executableName": "marky",
+			"maintainer": "Akos Gintl <75385706+akosgintl@users.noreply.github.com>",
 			"category": "Office",
 			"target": [
 				"AppImage",
