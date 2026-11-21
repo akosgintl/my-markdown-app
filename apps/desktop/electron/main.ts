@@ -18,6 +18,7 @@ import chokidar, { type FSWatcher } from "chokidar";
 import {
 	app,
 	BrowserWindow,
+	clipboard,
 	dialog,
 	ipcMain,
 	Menu,
@@ -51,6 +52,7 @@ import {
 	SEARCH_MIN_QUERY_LENGTH,
 } from "../src/lib/searchContent";
 import type { ThemePreference } from "../src/theme";
+import { assetPathFromUrl, imageAddressItem } from "./contextMenu";
 import { DeleteUndo } from "./deleteUndo";
 import { setupErrorReporting } from "./errorReporting";
 import { readNotePreviews } from "./notePreviews";
@@ -640,15 +642,6 @@ function sendToRenderer(channel: string, ...args: unknown[]) {
 	mainWindow?.webContents.send(channel, ...args);
 }
 
-function assetPathFromUrl(url: URL): string {
-	const queryPath = url.searchParams.get("path");
-	if (queryPath) return queryPath;
-	const encodedPath = url.pathname.startsWith("/")
-		? url.pathname.slice(1)
-		: url.pathname;
-	return decodeURIComponent(encodedPath);
-}
-
 function assetContentType(filePath: string): string {
 	switch (path.extname(filePath).toLowerCase()) {
 		case ".css":
@@ -815,8 +808,34 @@ function buildTextContextMenu(
 	return Menu.buildFromTemplate([...spellingItems, ...editItems]);
 }
 
-function registerTextContextMenu(window: BrowserWindow) {
+function buildImageContextMenu(
+	webContents: Electron.WebContents,
+	params: Electron.ContextMenuParams,
+) {
+	const address = imageAddressItem(params.srcURL);
+	return Menu.buildFromTemplate([
+		{
+			label: "Copy Image",
+			click: () => webContents.copyImageAt(params.x, params.y),
+		},
+		{
+			label: address.label,
+			click: () => clipboard.writeText(address.value),
+		},
+	]);
+}
+
+function registerContextMenu(window: BrowserWindow) {
 	window.webContents.on("context-menu", (_event, params) => {
+		// The editor is contenteditable, so images inside it report isEditable
+		// too; the image menu must win over the text menu.
+		if (params.mediaType === "image") {
+			buildImageContextMenu(window.webContents, params).popup({
+				window,
+				frame: params.frame ?? undefined,
+			});
+			return;
+		}
 		if (!params.isEditable) return;
 		buildTextContextMenu(window.webContents, params).popup({
 			window,
@@ -1097,7 +1116,7 @@ async function createWindow() {
 		}
 	});
 	window.webContents.setWindowOpenHandler(() => ({ action: "deny" }));
-	registerTextContextMenu(window);
+	registerContextMenu(window);
 	if (windowState.isFullScreen) {
 		window.setFullScreen(true);
 	} else if (windowState.isMaximized) {
