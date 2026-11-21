@@ -219,7 +219,6 @@
 	background: var(--background);
 	transition:
 		background-color 160ms var(--ease-snappy),
-		border-color 160ms var(--ease-snappy),
 		transform 140ms var(--ease-snappy);
 }
 
@@ -405,7 +404,6 @@
 	gap: 0.15rem;
 	opacity: 0;
 	pointer-events: none;
-	transition: opacity 160ms var(--ease-snappy);
 }
 
 [data-marky-source-editor] .editorViewport {
