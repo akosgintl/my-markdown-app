@@ -35,6 +35,7 @@ import MingcuteCopy2Line from "~icons/mingcute/copy-2-line";
 import MingcuteDeleteLine from "~icons/mingcute/delete-line";
 import MingcuteEditLine from "~icons/mingcute/edit-line";
 import MingcuteExternalLinkLine from "~icons/mingcute/external-link-line";
+import MingcuteFoldVerticalLine from "~icons/mingcute/fold-vertical-line";
 import MingcuteFolderOpenLine from "~icons/mingcute/folder-open-line";
 import MingcuteMore2Line from "~icons/mingcute/more-2-line";
 import MingcuteNewFolderLine from "~icons/mingcute/new-folder-line";
@@ -42,6 +43,7 @@ import MingcutePinFill from "~icons/mingcute/pin-fill";
 import MingcutePinLine from "~icons/mingcute/pin-line";
 import MingcuteRightLine from "~icons/mingcute/right-line";
 import MingcuteSortDescendingLine from "~icons/mingcute/sort-descending-line";
+import MingcuteUnfoldVerticalLine from "~icons/mingcute/unfold-vertical-line";
 import { useResizeSeparator } from "../hooks/useResizeSeparator";
 import { isEditableEventTarget } from "../lib/dom";
 import {
@@ -517,7 +519,14 @@ export function Sidebar({
 	const list = children ? "children" : "tree";
 	const uncompactFolderId =
 		deleteOnCancel?.kind === "folder" ? deleteOnCancel.path : null;
-	const { collapseFolder, expandFolder, rows, toggleFolder } = useSidebarTree({
+	const {
+		collapseAllFolders,
+		collapseFolder,
+		expandAllFolders,
+		expandFolder,
+		rows,
+		toggleFolder,
+	} = useSidebarTree({
 		files,
 		folders,
 		getDisplayPath,
@@ -664,6 +673,19 @@ export function Sidebar({
 	const collapseRow = (row: SidebarRow) => {
 		if (row.kind === "folder") collapseFolder(row.id);
 	};
+	// The toggle flips the state of the visible tree: any open branch means the
+	// next click tidies up, otherwise it spreads everything out.
+	const hasFolderRows = rows.some((row) => row.kind === "folder");
+	const anyFolderExpanded = rows.some(
+		(row) => row.kind === "folder" && row.expanded,
+	);
+	const toggleAllFolders = () => {
+		if (anyFolderExpanded) collapseAllFolders();
+		else expandAllFolders();
+	};
+	const allFoldersLabel = anyFolderExpanded
+		? "Collapse all folders"
+		: "Expand all folders";
 	const activeIndex = rows.findIndex(
 		(row) => row.kind === "file" && row.file.path === highlightPath,
 	);
@@ -1381,6 +1403,21 @@ export function Sidebar({
 									onClick={() => void createFolder(null)}
 								>
 									<MingcuteNewFolderLine className="size-3.5" />
+								</Button>
+							)}
+							{hasFolderRows && (
+								<Button
+									variant="ghost"
+									size="icon-xs"
+									aria-label={allFoldersLabel}
+									title={allFoldersLabel}
+									onClick={toggleAllFolders}
+								>
+									{anyFolderExpanded ? (
+										<MingcuteFoldVerticalLine className="size-3.5" />
+									) : (
+										<MingcuteUnfoldVerticalLine className="size-3.5" />
+									)}
 								</Button>
 							)}
 							<Select.Root

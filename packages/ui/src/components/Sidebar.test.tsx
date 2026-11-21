@@ -54,6 +54,53 @@ describe("Sidebar", () => {
 		await act(async () => button?.click());
 		expect(onSelectFile).toHaveBeenCalledWith("note.md");
 	});
+	it("expands and collapses all folders from the header toggle", async () => {
+		const container = document.createElement("div");
+		document.body.append(container);
+		const root = createRoot(container);
+		roots.push(root);
+		act(() =>
+			root.render(
+				<Sidebar
+					files={[
+						{ path: "/workspace/alpha/middle.md", modifiedAt: 1 },
+						{ path: "/workspace/alpha/beta/one.md", modifiedAt: 2 },
+					]}
+					currentPath={null}
+					sortMode="alpha"
+					getDisplayPath={(path) => path.replace("/workspace/", "")}
+					onSortModeChange={() => {}}
+					onSelectFile={() => {}}
+				/>,
+			),
+		);
+
+		// Everything starts collapsed, so the toggle offers expansion.
+		expect(allFoldersToggle().getAttribute("aria-label")).toBe(
+			"Expand all folders",
+		);
+		expect(findFileButton("middle.md")).toBeUndefined();
+
+		await act(async () => allFoldersToggle().click());
+
+		expect(allFoldersToggle().getAttribute("aria-label")).toBe(
+			"Collapse all folders",
+		);
+		expect(folderRow("alpha")?.getAttribute("aria-expanded")).toBe("true");
+		expect(folderRow("beta")?.getAttribute("aria-expanded")).toBe("true");
+		expect(findFileButton("middle.md")).toBeDefined();
+		expect(findFileButton("one.md")).toBeDefined();
+
+		await act(async () => allFoldersToggle().click());
+
+		expect(allFoldersToggle().getAttribute("aria-label")).toBe(
+			"Expand all folders",
+		);
+		expect(folderRow("alpha")?.getAttribute("aria-expanded")).toBe("false");
+		expect(findFolderRow("beta")).toBeUndefined();
+		expect(findFileButton("middle.md")).toBeUndefined();
+		expect(findFileButton("one.md")).toBeUndefined();
+	});
 	it("continues editing after a new note name is submitted", async () => {
 		const onRenameFile = vi.fn();
 		renderSidebar(onRenameFile);
@@ -115,6 +162,32 @@ function SidebarHarness({ onRenameFile }: { onRenameFile: RenameFile }) {
 				return path;
 			}}
 		/>
+	);
+}
+
+function allFoldersToggle() {
+	const button = document.querySelector<HTMLButtonElement>(
+		'button[aria-label="Expand all folders"], button[aria-label="Collapse all folders"]',
+	);
+	if (!button) throw new Error("Missing expand/collapse folders toggle");
+	return button;
+}
+
+function findFolderRow(label: string) {
+	return Array.from(
+		document.querySelectorAll<HTMLElement>('[role="treeitem"][aria-expanded]'),
+	).find((element) => element.textContent === label);
+}
+
+function folderRow(label: string) {
+	const row = findFolderRow(label);
+	if (!row) throw new Error(`Missing folder row ${label}`);
+	return row;
+}
+
+function findFileButton(label: string) {
+	return Array.from(document.querySelectorAll("button")).find(
+		(element) => element.textContent === label,
 	);
 }
 

@@ -249,6 +249,48 @@ describe("useSidebarTree", () => {
 		);
 		expect(folderRow(harness.current.rows, "gamma/delta/").expanded).toBe(true);
 	});
+
+	it("expands every folder in the tree at once", () => {
+		const harness = renderTree({
+			files: nestedFiles,
+			folders: [{ path: "/workspace/gamma/empty" }],
+		});
+		expect(folderRow(harness.current.rows, "alpha/beta/").expanded).toBe(false);
+
+		act(() => harness.current.expandAllFolders());
+
+		const folderRows = harness.current.rows.flatMap((row) =>
+			row.kind === "folder" ? [row] : [],
+		);
+		expect(folderRows.map((row) => row.id)).toEqual([
+			"alpha/beta/",
+			"gamma/",
+			"gamma/delta/",
+			"gamma/empty/",
+		]);
+		expect(folderRows.every((row) => row.expanded)).toBe(true);
+		expect(filePaths(harness.current.rows)).toEqual([
+			"/workspace/alpha/beta/one.md",
+			"/workspace/gamma/delta/two.md",
+		]);
+	});
+
+	it("collapses every folder at once", () => {
+		const harness = renderTree({
+			files: nestedFiles,
+			folders: [{ path: "/workspace/gamma/empty" }],
+		});
+		act(() => harness.current.expandAllFolders());
+
+		act(() => harness.current.collapseAllFolders());
+
+		const folderRows = harness.current.rows.flatMap((row) =>
+			row.kind === "folder" ? [row] : [],
+		);
+		expect(folderRows.map((row) => row.id)).toEqual(["alpha/beta/", "gamma/"]);
+		expect(folderRows.every((row) => row.expanded)).toBe(false);
+		expect(filePaths(harness.current.rows)).toEqual([]);
+	});
 });
 
 const nestedFiles: SidebarFile[] = [
