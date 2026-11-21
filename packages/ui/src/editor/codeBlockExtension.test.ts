@@ -4,7 +4,7 @@ import { Editor } from "@tiptap/core";
 import { TextSelection } from "@tiptap/pm/state";
 import StarterKit from "@tiptap/starter-kit";
 import { afterEach, describe, expect, it } from "vitest";
-import { MarkyCodeBlock } from "./CodeBlockExtension";
+import { codeBlockLanguages, MarkyCodeBlock } from "./CodeBlockExtension";
 
 const editors: Editor[] = [];
 
@@ -48,6 +48,27 @@ describe("code block editor extension", () => {
 			attrs: { language: "ts" },
 			content: [{ type: "text", text: "const x = 1;" }],
 		});
+	});
+
+	it("offers TOML in the language picker", () => {
+		expect(codeBlockLanguages).toContainEqual({
+			value: "toml",
+			label: "TOML",
+		});
+	});
+
+	it("highlights TOML code blocks", () => {
+		const editor = createCodeBlockEditor(
+			'[section]\nkey = "value"',
+			undefined,
+			"toml",
+		);
+
+		const code = editor.view.dom.querySelector("code.language-toml");
+		expect(code).not.toBeNull();
+		expect(
+			code?.querySelectorAll(".hljs-attr, .hljs-string, .hljs-section").length,
+		).toBeGreaterThan(0);
 	});
 
 	it("uses four-space indents for Python code blocks", () => {

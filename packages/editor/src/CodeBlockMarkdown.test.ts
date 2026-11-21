@@ -14,6 +14,18 @@ describe("code block markdown conversion", () => {
 		expect(tiptapDocToMarkdown(doc)).toBe("```ts\nconst x: number = 1;\n```");
 	});
 
+	it("preserves TOML fenced code blocks and round-trips them", () => {
+		const markdown = "```toml\n[tool.marky]\nenabled = true\n```";
+		const doc = markdownToTiptapDoc(markdown);
+
+		expect(doc.content?.[0]).toEqual({
+			type: "codeBlock",
+			attrs: { language: "toml" },
+			content: [{ type: "text", text: "[tool.marky]\nenabled = true" }],
+		});
+		expect(tiptapDocToMarkdown(doc)).toBe(markdown);
+	});
+
 	it("keeps bare fenced code blocks bare", () => {
 		const doc = markdownToTiptapDoc("```\nplain\n```");
 
