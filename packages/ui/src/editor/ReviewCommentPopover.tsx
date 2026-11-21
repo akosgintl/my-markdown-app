@@ -41,17 +41,24 @@ import {
 type AnchorRange = { from: number; to: number };
 type PopoverMode = "new" | "thread";
 
-function formatRelativeTime(iso: string | undefined) {
+function parseReplyDate(iso: string | undefined) {
 	if (!iso) return null;
 	const timestamp = new Date(iso).getTime();
-	if (Number.isNaN(timestamp)) return null;
-	const elapsed = Date.now() - timestamp;
+	// Reply metadata is free-form text an agent can write into the file, so
+	// it may not parse as a date. An Invalid Date must never reach
+	// toISOString: that throws in render and the error boundary replaces the
+	// whole note with an error.
+	return Number.isNaN(timestamp) ? null : new Date(timestamp);
+}
+
+function formatRelativeTime(date: Date) {
+	const elapsed = Date.now() - date.getTime();
 	if (elapsed < 60_000) return "Just now";
 	if (elapsed < 3_600_000) return `${Math.floor(elapsed / 60_000)}m ago`;
 	if (elapsed < 86_400_000) return `${Math.floor(elapsed / 3_600_000)}h ago`;
 	if (elapsed < 7 * 86_400_000)
 		return `${Math.floor(elapsed / 86_400_000)}d ago`;
-	return new Date(timestamp).toLocaleDateString();
+	return date.toLocaleDateString();
 }
 
 function authorLabel(author: "human" | "agent" | undefined) {
@@ -718,26 +725,29 @@ export function ReviewCommentPopover({
 										{activeComment.attrs.body}
 									</p>
 								</div>
-								{(activeComment.attrs.replies ?? []).map((reply) => (
-									<div key={reply.id} className="mt-2.5">
-										<div className="sticky top-0 z-1 flex min-h-9 items-center gap-2 bg-popover pe-24">
-											<span className="shrink-0 text-xs font-semibold">
-												{authorLabel(reply.author)}
-											</span>
-											{reply.createdAt && (
-												<time
-													dateTime={new Date(reply.createdAt).toISOString()}
-													className="truncate text-[11px] text-muted-foreground"
-												>
-													{formatRelativeTime(reply.createdAt)}
-												</time>
-											)}
+								{(activeComment.attrs.replies ?? []).map((reply) => {
+									const createdAt = parseReplyDate(reply.createdAt);
+									return (
+										<div key={reply.id} className="mt-2.5">
+											<div className="sticky top-0 z-1 flex min-h-9 items-center gap-2 bg-popover pe-24">
+												<span className="shrink-0 text-xs font-semibold">
+													{authorLabel(reply.author)}
+												</span>
+												{createdAt && (
+													<time
+														dateTime={createdAt.toISOString()}
+														className="truncate text-[11px] text-muted-foreground"
+													>
+														{formatRelativeTime(createdAt)}
+													</time>
+												)}
+											</div>
+											<p className="mt-0.5 whitespace-pre-wrap text-[0.8125rem] leading-relaxed">
+												{reply.body}
+											</p>
 										</div>
-										<p className="mt-0.5 whitespace-pre-wrap text-[0.8125rem] leading-relaxed">
-											{reply.body}
-										</p>
-									</div>
-								))}
+									);
+								})}
 								<div className="mt-2.5">
 									<CommentComposer
 										value={replyDraft}
