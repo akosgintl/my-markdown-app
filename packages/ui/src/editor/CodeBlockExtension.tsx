@@ -224,7 +224,7 @@ async function copyCodeBlock(text: string) {
 	}
 }
 
-const codeBlockLanguages = [
+export const codeBlockLanguages = [
 	{ value: "", label: "Plain text" },
 	{ value: "js", label: "JavaScript" },
 	{ value: "ts", label: "TypeScript" },
@@ -238,4 +238,5 @@ const codeBlockLanguages = [
 	{ value: "python", label: "Python" },
 	{ value: "rust", label: "Rust" },
 	{ value: "go", label: "Go" },
+	{ value: "toml", label: "TOML" },
 ] as const;
