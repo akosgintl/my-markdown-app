@@ -7,7 +7,6 @@ import {
 	type ReactNode,
 	useEffect,
 	useLayoutEffect,
-	useReducer,
 	useRef,
 	useState,
 } from "react";
@@ -24,9 +23,19 @@ import {
 	pendingTerminalCommandStore,
 	terminalOpenStore,
 	terminalPositionStore,
-	viewerStore,
 	workspacePathStore,
 } from "../store/state";
+import { activeTabIdStore, tabsStore } from "../store/tabStore";
+import type { TabId } from "../store/tabs";
+import {
+	docTerminals,
+	type StartSessionOptions,
+	startTerminalSession,
+	terminalTabsStore,
+	withSessionActivated,
+	withSessionRemoved,
+	withSessionRenamed,
+} from "../store/terminalTabs";
 import { isDarkTheme, subscribeTheme } from "../theme";
 import "@xterm/xterm/css/xterm.css";
 import MingcuteAddLine from "~icons/mingcute/add-line";
@@ -34,30 +43,6 @@ import MingcuteCheckLine from "~icons/mingcute/check-line";
 import MingcuteCloseLine from "~icons/mingcute/close-line";
 import MingcuteLayoutBottomLine from "~icons/mingcute/layout-bottom-line";
 import MingcuteLayoutRightLine from "~icons/mingcute/layout-right-line";
-
-type Session = {
-	id: string;
-	title: string;
-};
-
-type StartSessionOptions = { initialCommand?: string };
-
-type TerminalState = {
-	sessions: Session[];
-	activeSessionId: string | null;
-};
-
-type TerminalAction =
-	| { type: "activate"; sessionId: string }
-	| { type: "add"; session: Session }
-	| { type: "remove"; sessionId: string }
-	| { type: "rename"; sessionId: string; title: string }
-	| { type: "reset" };
-
-const EMPTY_TERMINAL_STATE: TerminalState = {
-	sessions: [],
-	activeSessionId: null,
-};
 
 const MIN_PANEL_HEIGHT = 100;
 const MIN_PANEL_WIDTH = 240;
@@ -76,65 +61,6 @@ function clampPanelWidth(width: number) {
 	);
 }
 
-function fallbackActiveSessionId(
-	sessions: Session[],
-	activeSessionId: string | null,
-): string | null {
-	if (
-		activeSessionId &&
-		sessions.some((session) => session.id === activeSessionId)
-	) {
-		return activeSessionId;
-	}
-	return sessions[sessions.length - 1]?.id ?? null;
-}
-
-function terminalStateReducer(
-	state: TerminalState,
-	action: TerminalAction,
-): TerminalState {
-	switch (action.type) {
-		case "activate":
-			if (!state.sessions.some((session) => session.id === action.sessionId)) {
-				return state;
-			}
-			return {
-				...state,
-				activeSessionId: action.sessionId,
-			};
-		case "add":
-			return {
-				sessions: [...state.sessions, action.session],
-				activeSessionId: action.session.id,
-			};
-		case "remove": {
-			const sessions = state.sessions.filter(
-				(session) => session.id !== action.sessionId,
-			);
-			return {
-				sessions,
-				activeSessionId: fallbackActiveSessionId(
-					sessions,
-					state.activeSessionId === action.sessionId
-						? null
-						: state.activeSessionId,
-				),
-			};
-		}
-		case "rename":
-			return {
-				...state,
-				sessions: state.sessions.map((session) =>
-					session.id === action.sessionId
-						? { ...session, title: action.title }
-						: session,
-				),
-			};
-		case "reset":
-			return EMPTY_TERMINAL_STATE;
-	}
-}
-
 function cssColorToRgba(color: string): string {
 	const canvas = document.createElement("canvas");
 	canvas.width = 1;
@@ -145,30 +71,6 @@ function cssColorToRgba(color: string): string {
 	ctx.fillRect(0, 0, 1, 1);
 	const [r, g, b, a] = ctx.getImageData(0, 0, 1, 1).data;
 	return `rgba(${r}, ${g}, ${b}, ${a / 255})`;
-}
-
-async function startTerminalSession(
-	title: string,
-	options: StartSessionOptions,
-	onStart: (session: Session) => void,
-) {
-	while (true) {
-		const requestedWorkspacePath = workspacePathStore.get();
-		if (!requestedWorkspacePath) return;
-		const notePath = viewerStore.get().currentPath ?? undefined;
-		const sessionId = await desktopApi.terminalStart(requestedWorkspacePath, {
-			...(notePath ? { notePath } : {}),
-			...options,
-		});
-		if (workspacePathStore.get() === requestedWorkspacePath) {
-			onStart({ id: sessionId, title });
-			return;
-		}
-		// The workspace changed while this shell booted. Adopting it would
-		// show a shell cwd'd to the old workspace, so drop it and retry.
-		void desktopApi.terminalStop(sessionId);
-		if (!terminalOpenStore.get()) return;
-	}
 }
 
 const LIGHT_THEME = {
@@ -213,12 +115,13 @@ export function TerminalPanel() {
 	const isOpen = useStoreValue(terminalOpenStore);
 	const workspacePath = useStoreValue(workspacePathStore);
 	const pendingTerminalCommand = useStoreValue(pendingTerminalCommandStore);
-	const [{ sessions, activeSessionId }, dispatch] = useReducer(
-		terminalStateReducer,
-		EMPTY_TERMINAL_STATE,
-	);
 	const position = useStoreValue(terminalPositionStore);
-	const isRight = position === "right";
+	const tabs = useStoreValue(tabsStore);
+	const activeTabId = useStoreValue(activeTabIdStore);
+	const terminalTabs = useStoreValue(terminalTabsStore);
+	// Only the active document tab's terminals are shown; every other
+	// document tab's sessions keep running (and buffering) in the background.
+	const { sessions, activeSessionId } = docTerminals(terminalTabs, activeTabId);
 	const [height, setHeight] = useState(256);
 	const [width, setWidth] = useState(420);
 	const [renamingSessionId, setRenamingSessionId] = useState<string | null>(
@@ -227,78 +130,76 @@ export function TerminalPanel() {
 	const [renameDraft, setRenameDraft] = useState("");
 	const [startError, setStartError] = useState<string | null>(null);
 	const isInitializingRef = useRef(false);
-	const suppressAutoCloseRef = useRef(false);
 	const previousSessionCountRef = useRef(0);
-	const previousWorkspacePathRef = useRef<string | null | undefined>(undefined);
+	const previousAutoCloseTabIdRef = useRef<TabId | null | undefined>(undefined);
+	const previousInitTabIdRef = useRef<TabId | null | undefined>(undefined);
+	const previousInitWorkspacePathRef = useRef<string | null | undefined>(
+		undefined,
+	);
 
 	const { isResizing, separatorProps } = useResizeSeparator({
-		axis: isRight ? "col" : "row",
+		axis: position === "right" ? "col" : "row",
 		label: "Resize terminal panel",
-		value: isRight ? width : height,
-		min: isRight ? MIN_PANEL_WIDTH : MIN_PANEL_HEIGHT,
+		value: position === "right" ? width : height,
+		min: position === "right" ? MIN_PANEL_WIDTH : MIN_PANEL_HEIGHT,
 		max: () =>
-			isRight
+			position === "right"
 				? window.innerWidth - MIN_PANEL_WIDTH
 				: window.innerHeight - MIN_PANEL_HEIGHT,
 		onChange: (next) =>
-			isRight
+			position === "right"
 				? setWidth(clampPanelWidth(next))
 				: setHeight(clampPanelHeight(next)),
 		getPointerValue: ({ event }) =>
-			isRight
+			position === "right"
 				? window.innerWidth - event.clientX
 				: window.innerHeight - event.clientY,
 	});
 
+	// Stop the terminals of document tabs that are gone: a closed tab, or the
+	// tab set a workspace switch replaced. Live tabs' sessions keep running.
 	useEffect(() => {
-		if (sessions.length === 0 && previousSessionCountRef.current > 0) {
-			if (suppressAutoCloseRef.current) {
-				// Workspace switches clear the old sessions, but the panel should
-				// stay open so the new workspace can boot a fresh shell.
-				suppressAutoCloseRef.current = false;
-			} else {
-				isInitializingRef.current = false;
-				queueMicrotask(() => setTerminalOpen(false));
-			}
+		const live = new Set(tabs.order);
+		const orphanedSessions = Object.entries(terminalTabs.byDocTab)
+			.filter(([docTabId]) => !live.has(docTabId))
+			.flatMap(([, entry]) => entry.sessions.map((session) => session.id));
+		if (orphanedSessions.length === 0) return;
+		terminalTabsStore.set((state) => {
+			const liveNow = new Set(tabsStore.get().order);
+			return {
+				byDocTab: Object.fromEntries(
+					Object.entries(state.byDocTab).filter(([docTabId]) =>
+						liveNow.has(docTabId),
+					),
+				),
+			};
+		});
+		for (const sessionId of orphanedSessions) {
+			void desktopApi.terminalStop(sessionId);
 		}
+	}, [tabs, terminalTabs]);
+
+	// Closing the active document tab's last terminal closes the panel — but
+	// switching document tabs must not, even when the new tab has none.
+	useEffect(() => {
+		const switchedDocTab = previousAutoCloseTabIdRef.current !== activeTabId;
+		previousAutoCloseTabIdRef.current = activeTabId;
+		const previousCount = previousSessionCountRef.current;
 		previousSessionCountRef.current = sessions.length;
-	}, [sessions.length]);
-
-	useEffect(() => {
-		const previousWorkspacePath = previousWorkspacePathRef.current;
-		previousWorkspacePathRef.current = workspacePath;
-
-		if (
-			previousWorkspacePath === undefined ||
-			previousWorkspacePath === workspacePath
-		) {
-			return;
-		}
-
-		if (sessions.length === 0) {
-			return;
-		}
-
-		suppressAutoCloseRef.current = true;
+		if (switchedDocTab) return;
+		if (!(previousCount > 0 && sessions.length === 0)) return;
 		isInitializingRef.current = false;
-
-		const sessionIds = sessions.map((session) => session.id);
-		dispatch({ type: "reset" });
-
-		void Promise.all(
-			sessionIds.map((sessionId) => desktopApi.terminalStop(sessionId)),
-		);
-	}, [sessions, workspacePath]);
+		queueMicrotask(() => setTerminalOpen(false));
+	}, [activeTabId, sessions.length]);
 
 	const startSession = async (
 		title: string,
 		options: StartSessionOptions = {},
 	) => {
+		if (!activeTabId) return;
 		setStartError(null);
 		try {
-			await startTerminalSession(title, options, (session) => {
-				dispatch({ type: "add", session });
-			});
+			await startTerminalSession(activeTabId, title, options);
 		} catch (error) {
 			console.error("Failed to start terminal session:", error);
 			setStartError(
@@ -308,11 +209,23 @@ export function TerminalPanel() {
 	};
 
 	// Start sessions while the panel is open: a pending chat command gets its
-	// own tab; otherwise an empty panel boots a plain shell. sessions.length
-	// retries a chat launch that arrived while another session was starting.
+	// own tab; otherwise an empty panel boots a plain shell. Switching document
+	// tabs starts nothing — an empty strip waits for the + button. A workspace
+	// switch boots a fresh shell right away. sessions.length retries a chat
+	// launch that arrived while another session was starting.
 	// biome-ignore lint/correctness/useExhaustiveDependencies: startSession is render-local
 	useEffect(() => {
-		if (!isOpen || !workspacePath || isInitializingRef.current) return;
+		const switchedWorkspace =
+			previousInitWorkspacePathRef.current !== workspacePath;
+		const switchedDocTab = previousInitTabIdRef.current !== activeTabId;
+		previousInitWorkspacePathRef.current = workspacePath;
+		previousInitTabIdRef.current = activeTabId;
+		if (!isOpen || !workspacePath || !activeTabId) return;
+		if (switchedDocTab && !switchedWorkspace && !pendingTerminalCommand) {
+			setStartError(null);
+			return;
+		}
+		if (isInitializingRef.current) return;
 		if (!pendingTerminalCommand && sessions.length > 0) return;
 
 		isInitializingRef.current = true;
@@ -330,18 +243,24 @@ export function TerminalPanel() {
 				isInitializingRef.current = false;
 			},
 		);
-	}, [isOpen, pendingTerminalCommand, workspacePath, sessions.length]);
+	}, [
+		isOpen,
+		pendingTerminalCommand,
+		workspacePath,
+		activeTabId,
+		sessions.length,
+	]);
 
 	const handleCloseSession = async (sessionId: string) => {
 		await desktopApi.terminalStop(sessionId);
-		dispatch({ type: "remove", sessionId });
+		terminalTabsStore.set((state) => withSessionRemoved(state, sessionId));
 	};
 
 	const handleSessionExit = (sessionId: string) => {
-		dispatch({ type: "remove", sessionId });
+		terminalTabsStore.set((state) => withSessionRemoved(state, sessionId));
 	};
 
-	const beginRename = (session: Session) => {
+	const beginRename = (session: { id: string; title: string }) => {
 		setRenamingSessionId(session.id);
 		setRenameDraft(session.title);
 	};
@@ -350,21 +269,30 @@ export function TerminalPanel() {
 		if (!renamingSessionId) return;
 		const title = renameDraft.trim();
 		if (title) {
-			dispatch({ type: "rename", sessionId: renamingSessionId, title });
+			terminalTabsStore.set((state) =>
+				withSessionRenamed(state, renamingSessionId, title),
+			);
 		}
 		setRenamingSessionId(null);
 	};
 
+	// Sessions of background document tabs stay mounted (hidden) so their
+	// scrollback keeps buffering while another note's terminals are shown.
+	const mountedSessions = Object.entries(terminalTabs.byDocTab).flatMap(
+		([docTabId, entry]) =>
+			entry.sessions.map((session) => ({ docTabId, session })),
+	);
+
 	return (
 		<div
 			style={
-				isRight
+				position === "right"
 					? { width: isOpen ? width : undefined }
 					: { height: isOpen ? height : undefined }
 			}
 			className={cn(
 				"flex flex-col border-border bg-background z-20 relative",
-				isRight ? "border-l" : "border-t",
+				position === "right" ? "border-l" : "border-t",
 				isResizing && "select-none",
 				!isOpen && "hidden",
 			)}
@@ -372,7 +300,7 @@ export function TerminalPanel() {
 			<div
 				className={cn(
 					"group absolute outline-none z-30",
-					isRight
+					position === "right"
 						? "-left-1.25 top-0 bottom-0 w-2.5 cursor-col-resize"
 						: "-top-1.25 left-0 right-0 h-2.5 cursor-row-resize",
 				)}
@@ -381,7 +309,7 @@ export function TerminalPanel() {
 				<span
 					className={cn(
 						"absolute bg-transparent group-focus:bg-primary",
-						isRight
+						position === "right"
 							? "top-0 bottom-0 left-1/2 w-px"
 							: "left-0 right-0 top-1/2 h-px",
 						isResizing && "bg-primary",
@@ -427,9 +355,12 @@ export function TerminalPanel() {
 									aria-pressed={activeSessionId === session.id}
 									className="flex min-w-0 flex-1 cursor-pointer items-center gap-2 rounded-[inherit] px-3 py-1"
 									title="Double click to rename"
-									onClick={() =>
-										dispatch({ type: "activate", sessionId: session.id })
-									}
+									onClick={() => {
+										if (!activeTabId) return;
+										terminalTabsStore.set((state) =>
+											withSessionActivated(state, activeTabId, session.id),
+										);
+									}}
 									onDoubleClick={() => beginRename(session)}
 								>
 									<span className="truncate flex-1">{session.title}</span>
@@ -478,23 +409,27 @@ export function TerminalPanel() {
 
 			{/* Terminal Viewports */}
 			<div className="flex-1 relative overflow-hidden bg-background p-2 pb-0">
-				{sessions.map((session) => (
-					<div
-						key={session.id}
-						className={cn(
-							"absolute inset-2",
-							activeSessionId === session.id
-								? "z-10 opacity-100"
-								: "z-0 opacity-0 pointer-events-none",
-						)}
-					>
-						<TerminalInstance
-							onExit={handleSessionExit}
-							sessionId={session.id}
-							isActive={activeSessionId === session.id}
-						/>
-					</div>
-				))}
+				{mountedSessions.map(({ docTabId, session }) => {
+					const isActive =
+						docTabId === activeTabId && activeSessionId === session.id;
+					return (
+						<div
+							key={session.id}
+							className={cn(
+								"absolute inset-2",
+								isActive
+									? "z-10 opacity-100"
+									: "z-0 opacity-0 pointer-events-none",
+							)}
+						>
+							<TerminalInstance
+								onExit={handleSessionExit}
+								sessionId={session.id}
+								isActive={isActive}
+							/>
+						</div>
+					);
+				})}
 				{sessions.length === 0 && (
 					<div
 						className={cn(
