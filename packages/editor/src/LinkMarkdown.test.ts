@@ -63,6 +63,75 @@ describe("link where text equals href", () => {
 	});
 });
 
+describe("reference-style link conversion", () => {
+	it("preserves reference-style links through a save cycle", () => {
+		const doc = markdownToTiptapDoc(
+			"Read the [project site][site] for details.\n\n[site]: https://example.com",
+		);
+
+		expect(doc.content?.[0]).toMatchObject({
+			type: "paragraph",
+			content: [
+				{ type: "text", text: "Read the " },
+				{
+					type: "text",
+					text: "project site",
+					marks: [
+						{
+							type: "link",
+							attrs: {
+								href: "https://example.com",
+								kind: "url",
+								target: null,
+							},
+						},
+					],
+				},
+				{ type: "text", text: " for details." },
+			],
+		});
+		expect(tiptapDocToMarkdown(doc)).toBe(
+			"Read the [project site](https://example.com) for details.",
+		);
+	});
+
+	it("resolves collapsed references", () => {
+		const doc = markdownToTiptapDoc(
+			"[OpenAI][]\n\n[OpenAI]: https://openai.com",
+		);
+		const textNode = doc.content?.[0]?.content?.[0];
+		expect(textNode?.text).toBe("OpenAI");
+		expect(textNode?.marks).toEqual([
+			{
+				type: "link",
+				attrs: { href: "https://openai.com", kind: "url", target: null },
+			},
+		]);
+	});
+
+	it("matches definitions case-insensitively", () => {
+		const doc = markdownToTiptapDoc(
+			"[Docs][Site]\n\n[SITE]: https://docs.example.com",
+		);
+		const textNode = doc.content?.[0]?.content?.[0];
+		expect(textNode?.marks).toEqual([
+			{
+				type: "link",
+				attrs: { href: "https://docs.example.com", kind: "url", target: null },
+			},
+		]);
+	});
+
+	it("keeps unresolved references as literal text", () => {
+		const input = "Read [this][missing].";
+		const doc = markdownToTiptapDoc(input);
+		const paragraph = doc.content?.[0];
+		expect(paragraph?.content?.[0]?.type).toBe("text");
+		expect(paragraph?.content?.[0]?.marks).toBeUndefined();
+		expect(tiptapDocToMarkdown(doc)).toBe(input);
+	});
+});
+
 describe("wikilink markdown conversion", () => {
 	it("parses wikilinks into wiki link marks", () => {
 		const doc = markdownToTiptapDoc("[[Notes/File 2.md]]");

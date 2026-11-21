@@ -5,7 +5,17 @@ import type {
 	RootContent,
 } from "hast";
 import { fromHtml } from "hast-util-from-html";
-import type { Content, Image, List, ListItem, Paragraph, Root } from "mdast";
+import type {
+	Content,
+	Definition,
+	Image,
+	ImageReference,
+	LinkReference,
+	List,
+	ListItem,
+	Paragraph,
+	Root,
+} from "mdast";
 import remarkGfm from "remark-gfm";
 import remarkParse from "remark-parse";
 import { type Plugin, unified } from "unified";
@@ -23,6 +33,7 @@ export function markdownToTiptapDoc(markdown: string): JSONContent {
 		.use(remarkRemoveEmptyMarkers);
 	const parsed = processor.parse(input);
 	const tree = processor.runSync(parsed) as Root;
+	resolveReferenceNodes(tree);
 	return {
 		type: "doc",
 		content: normalizeBlockContent(tree.children).flatMap(blockToPM),
@@ -32,6 +43,109 @@ export function markdownToTiptapDoc(markdown: string): JSONContent {
 function normalizeBlockContent(children: Content[]): Content[] {
 	// mdast root.children are already block-level. Return as-is for now.
 	return children;
+}
+
+// Reference-style links/images (`[text][id]`, `![alt][id]`) and their
+// `[id]: url` definitions would otherwise be dropped by the block/inline
+// converters below. Resolve them up front: definitions are consumed and each
+// resolvable reference becomes a plain link/image, which serializes back to
+// inline Markdown on save. Unresolvable references stay as literal text so
+// nothing is lost.
+type MarkdownDefinition = { url: string; title: string | null };
+
+function resolveReferenceNodes(root: Root): void {
+	const definitions = new Map<string, MarkdownDefinition>();
+	visit(root, "definition", (node) => {
+		const definition = node as Definition;
+		// The first definition for an identifier wins (CommonMark).
+		if (definition.url && !definitions.has(definition.identifier)) {
+			definitions.set(definition.identifier, {
+				url: definition.url,
+				title: definition.title ?? null,
+			});
+		}
+	});
+	root.children = resolveReferenceChildren(root.children, definitions);
+}
+
+function resolveReferenceChildren(
+	children: Content[],
+	definitions: Map<string, MarkdownDefinition>,
+): Content[] {
+	return children.flatMap((child) => {
+		switch (child.type) {
+			case "definition":
+				// Consumed by the references it defines.
+				return [];
+			case "linkReference":
+				return [linkReferenceToContent(child, definitions)];
+			case "imageReference":
+				return [imageReferenceToContent(child, definitions)];
+			default:
+				return [replaceChildReferences(child, definitions)];
+		}
+	});
+}
+
+function replaceChildReferences(
+	node: Content,
+	definitions: Map<string, MarkdownDefinition>,
+): Content {
+	if (!("children" in node) || !Array.isArray(node.children)) return node;
+	return {
+		...node,
+		children: resolveReferenceChildren(node.children, definitions),
+	} as Content;
+}
+
+function linkReferenceToContent(
+	node: LinkReference,
+	definitions: Map<string, MarkdownDefinition>,
+): Content {
+	const definition = definitions.get(node.identifier);
+	if (!definition) return unresolvedReferenceToText(node, false);
+	return {
+		type: "link",
+		url: definition.url,
+		title: definition.title,
+		// A linkReference's children are phrasing content, and every replacement
+		// below (link, image, text) is phrasing too, so this cast is sound.
+		children: resolveReferenceChildren(
+			node.children ?? [],
+			definitions,
+		) as LinkReference["children"],
+	};
+}
+
+function imageReferenceToContent(
+	node: ImageReference,
+	definitions: Map<string, MarkdownDefinition>,
+): Content {
+	const definition = definitions.get(node.identifier);
+	if (!definition) return unresolvedReferenceToText(node, true);
+	return {
+		type: "image",
+		url: definition.url,
+		title: definition.title,
+		alt: node.alt ?? "",
+	};
+}
+
+function unresolvedReferenceToText(
+	node: LinkReference | ImageReference,
+	isImage: boolean,
+): Content {
+	const label = node.label ?? node.identifier ?? "";
+	const suffix =
+		node.referenceType === "full"
+			? `[${node.identifier}]`
+			: node.referenceType === "collapsed"
+				? "[]"
+				: "";
+	return {
+		type: "text",
+		value: `${isImage ? "!" : ""}[${label}]${suffix}`,
+	};
 }
 
 function blockToPM(node: Content): JSONContent[] {
