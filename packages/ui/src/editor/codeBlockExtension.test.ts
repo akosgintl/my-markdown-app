@@ -4,7 +4,7 @@ import { Editor } from "@tiptap/core";
 import { TextSelection } from "@tiptap/pm/state";
 import StarterKit from "@tiptap/starter-kit";
 import { afterEach, describe, expect, it } from "vitest";
-import { MarkyCodeBlock } from "./CodeBlockExtension";
+import { codeBlockLanguages, MarkyCodeBlock } from "./CodeBlockExtension";
 
 const editors: Editor[] = [];
 
@@ -14,6 +14,13 @@ afterEach(() => {
 });
 
 describe("code block editor extension", () => {
+	it("lists YAML in the code block language picker", () => {
+		expect(codeBlockLanguages).toContainEqual({
+			value: "yaml",
+			label: "YAML",
+		});
+	});
+
 	it("inserts two spaces for Tab inside TypeScript code blocks", () => {
 		const editor = createCodeBlockEditor();
 
